@@ -1,0 +1,184 @@
+#!/usr/bin/python3
+'''
+Created on 2017年10月31日
+
+@author: kevin-yang
+'''
+
+import urllib.request
+import urllib.error
+import re
+import os
+import sys
+import glob
+import shutil
+from bs4 import BeautifulSoup
+import argparse
+
+class VersionInfo(object):
+    def __init__(self, num_array):
+        self.__num_array = num_array
+        
+    def __gt__(self, other):
+        if self.__num_array == None and other.__num_array != None:
+            return False
+        if other.__num_array == None and self.__num_array != None:
+            return True
+        i = 0;
+        for vnum in self.__num_array:
+            if i == len(other.__num_array):
+                return True
+            if vnum > other.__num_array[i]:
+                return True
+            elif vnum < other.__num_array[i]:
+                return False
+            else:
+                i = i+1
+    
+    def show(self):
+        if(self.__num_array == None):
+            return ""
+        retStr = str(self.__num_array[0]);
+        for idx in range(1, len(self.__num_array)):
+            vnum = self.__num_array[idx];
+            retStr = retStr + "." + str(vnum)
+        return retStr
+    
+class RequestReader(object):
+    def __init__(self, url):
+        self.__url = url
+        
+    def getContent(self):
+        reqest = urllib.request.Request(self.__url)
+        try:
+            response = urllib.request.urlopen(reqest)
+        except urllib.error.HTTPError as e:
+            print("HTTP ERROR:{}".format(e.code))
+        except urllib.error.URLError as e:
+            print("URL ERROR:{}".format(e.reason))
+        else:
+            return response.read()
+        
+class PackageInfo(object):
+    def __init__(self, version, dl_suffix):
+        self.version = version
+        self.dl_suffix = dl_suffix
+
+class PackageDownloader(object):
+    def __init__(self, package_name, repo_url, dl_dir):
+        self.__package_name_pattern = package_name
+        self.__repo_url = repo_url
+        self.__dl_dir = dl_dir
+        
+    def getPackageInfos(self):
+        print("Parsing download link for <{}> from {}".format(self.__package_name_pattern, self.__repo_url))
+        reader = RequestReader(self.__repo_url)
+        #Prettify html content as a standard input for regular expression
+        bs = BeautifulSoup(reader.getContent().decode(), "lxml")
+        content = bs.prettify()
+        pack_name_pattern = "({})".format(self.__package_name_pattern)
+        pattern = re.compile(r"<a href=\"({}-((\d+)(\.(\d+))*)\.tar\.(bz2|gz|xz))\">".format(pack_name_pattern))
+        items = re.findall(pattern, content)
+        if len(items) == 0:
+            print("Download link not found for {}!".format(self.__package_name_pattern))
+            return None
+        pack_names = set()
+        package_infos = {}
+        for item in items:
+            pack_name = item[1]
+            version = VersionInfo(list(map(int, item[2].split("."))));
+            if pack_name in pack_names:
+                if version > package_infos[pack_name].version:
+                    package_infos[pack_name] = PackageInfo(version, item[0])
+            else:
+                pack_names.add(pack_name)
+                package_infos[pack_name] = PackageInfo(version, item[0])
+        return package_infos
+    
+    def downloadLatestVersion(self):
+        print("===========================================================")
+        print("Handling <{}>".format(self.__package_name_pattern))
+        packInfos = self.getPackageInfos()
+        if len(packInfos) > 0:
+            for pack_name, packInfo in packInfos.items():
+                pack_file_path = os.path.join(self.__dl_dir, packInfo.dl_suffix)
+                if os.path.exists(pack_file_path):
+                    print("Version {} is already latest version for <{}>".format(packInfo.version.show(), pack_name))
+                else:
+                    self.__deprecateOldPacks(packInfo.version)
+                    self.__download(packInfo, self.__dl_dir)
+            return True
+        else:
+            return False
+        
+    def __download(self, packInfo, dl_path):
+        print("Downloading: {}...".format(packInfo.dl_suffix))
+        dl_request = RequestReader(self.__repo_url + packInfo.dl_suffix);
+        f = open(os.path.join(dl_path, packInfo.dl_suffix), "wb+")
+        f.write(dl_request.getContent())
+        f.close()
+        print("Finish!")
+    
+    def __compareFileVersion(self, old_pack_files, latest_ver):
+        for old_file in old_pack_files:
+            version_pattern = re.compile(r"{}-((\d+)(.(\d+))*)".format(self.__package_name_pattern))
+            items = re.findall(version_pattern, old_file)
+            if len(items) > 0:
+                cur_ver = VersionInfo(list(map(int, items[0][0].split("."))))
+                if not latest_ver > cur_ver:
+                    old_pack_files.remove(old_file)
+    
+    def __deprecateOldPacks(self, latest_ver):
+        old_pack_files = glob.glob(os.path.join(self.__dl_dir, self.__package_name_pattern + "-*"))
+        self.__compareFileVersion(old_pack_files, latest_ver)
+        if len(old_pack_files) > 0:
+            print("Out-of-date packages found: \n{}\nMoving them into deprecated folder...".format(old_pack_files))
+            deprecated_dir = os.path.join(self.__dl_dir, "..", "deprecated");
+            if not os.path.exists(deprecated_dir):
+                os.mkdir(deprecated_dir)
+            deprecated_files = list(map(lambda a : a.replace(self.__dl_dir, deprecated_dir), old_pack_files))
+            list(map(shutil.move, old_pack_files, deprecated_files))
+        
+class DownloadListHander(object):
+    def __init__(self, dl_dir, conf_path):
+        self.__dl_dir = dl_dir
+        self.__conf_path = conf_path
+        
+    def start(self):
+        if not os.path.exists(self.__conf_path):
+            print("{} not found！".format(self.__conf_path))
+            sys.exit(-1)
+        if not os.path.exists(self.__dl_dir):
+            os.mkdir(self.__dl_dir)
+        for line in open(self.__conf_path):
+            items = line.split()
+            if len(items) == 2:
+                PackageDownloader(items[0], items[1], self.__dl_dir).downloadLatestVersion()
+            elif len(items) >= 1 and items[0] == ">>>>>>>>":
+                break;
+        print("All tasks finished")
+        
+class Main(object):
+    def __init__(self):
+        self.__parseOpts()
+        self.__start()
+        
+    def __parseOpts(self):
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-o","--output", dest="dl_dir", help="specify package download directory")
+        parser.add_argument("-c","--config", dest="conf_path", help="specify package list configuration file")
+        options = parser.parse_args()
+        if options.dl_dir == None or options.conf_path == None:
+            parser.print_help()
+            sys.exit()
+        else:
+            self.__dl_dir = options.dl_dir
+            self.__conf_path = options.conf_path
+        
+    
+    def __start(self):
+        handler = DownloadListHander(self.__dl_dir, self.__conf_path)
+        handler.start()
+        
+if __name__ == '__main__':
+    Main()    
