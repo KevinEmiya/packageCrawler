@@ -76,8 +76,11 @@ class PackageDownloader(object):
         #Prettify html content as a standard input for regular expression
         bs = BeautifulSoup(reader.getContent().decode(), "lxml")
         content = bs.prettify()
-        pack_name_pattern = "({})".format(self.__package_name_pattern)
-        pattern = re.compile(r"<a href=\"({}-((\d+)(\.(\d+))*)\.tar\.(bz2|gz|xz))\">".format(pack_name_pattern))
+        pack_name_pattern = "(({})-((\d+)(\.(\d+))*)\.tar\.(bz2|gz|xz))".format(self.__package_name_pattern)
+        protocol = self.__repo_url.split(":")[0]
+        if protocol == "http" or protocol == "https":
+            pack_name_pattern = "href=\"{}\"".format(pack_name_pattern)
+        pattern = re.compile(r"{}".format(pack_name_pattern))
         items = re.findall(pattern, content)
         if len(items) == 0:
             print("Download link not found for {}!".format(self.__package_name_pattern))
@@ -98,9 +101,9 @@ class PackageDownloader(object):
     def downloadLatestVersion(self):
         print("===========================================================")
         print("Handling <{}>".format(self.__package_name_pattern))
-        packInfos = self.getPackageInfos()
-        if len(packInfos) > 0:
-            for pack_name, packInfo in packInfos.items():
+        pack_infos = self.getPackageInfos()
+        if pack_infos and len(pack_infos) > 0:
+            for pack_name, packInfo in pack_infos.items():
                 pack_file_path = os.path.join(self.__dl_dir, packInfo.dl_suffix)
                 if os.path.exists(pack_file_path):
                     print("Version {} is already latest version for <{}>".format(packInfo.version.show(), pack_name))
