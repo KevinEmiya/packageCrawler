@@ -48,7 +48,7 @@ class RequestReader(object):
     def __init__(self, url):
         self.__url = url
         
-    def getContent(self):
+    def get_content(self):
         reqest = urllib.request.Request(self.__url)
         try:
             response = urllib.request.urlopen(reqest)
@@ -70,11 +70,11 @@ class PackageDownloader(object):
         self.__repo_url = repo_url
         self.__dl_dir = dl_dir
         
-    def getPackageInfos(self):
+    def parse_pack_infos(self):
         print("Parsing download link for <{}> from {}".format(self.__package_name_pattern, self.__repo_url))
         reader = RequestReader(self.__repo_url)
         #Prettify html content as a standard input for regular expression
-        bs = BeautifulSoup(reader.getContent().decode(), "lxml")
+        bs = BeautifulSoup(reader.get_content().decode(), "lxml")
         content = bs.prettify()
         pack_name_pattern = "(({})-((\d+)(\.(\d+))*)\.tar\.(bz2|gz|xz))".format(self.__package_name_pattern)
         protocol = self.__repo_url.split(":")[0]
@@ -98,17 +98,17 @@ class PackageDownloader(object):
                 package_infos[pack_name] = PackageInfo(version, item[0])
         return package_infos
     
-    def downloadLatestVersion(self):
+    def download_latest_version(self):
         print("===========================================================")
         print("Handling <{}>".format(self.__package_name_pattern))
-        pack_infos = self.getPackageInfos()
+        pack_infos = self.parse_pack_infos()
         if pack_infos and len(pack_infos) > 0:
             for pack_name, packInfo in pack_infos.items():
                 pack_file_path = os.path.join(self.__dl_dir, packInfo.dl_suffix)
                 if os.path.exists(pack_file_path):
                     print("Version {} is already latest version for <{}>".format(packInfo.version.show(), pack_name))
                 else:
-                    self.__deprecateOldPacks(packInfo.version)
+                    self.__deprecate_old_packs(packInfo.version)
                     self.__download(packInfo, self.__dl_dir)
             return True
         else:
@@ -118,11 +118,11 @@ class PackageDownloader(object):
         print("Downloading: {}...".format(packInfo.dl_suffix))
         dl_request = RequestReader(self.__repo_url + packInfo.dl_suffix);
         f = open(os.path.join(dl_path, packInfo.dl_suffix), "wb+")
-        f.write(dl_request.getContent())
+        f.write(dl_request.get_content())
         f.close()
         print("Finish!")
     
-    def __compareFileVersion(self, old_pack_files, latest_ver):
+    def __compare_file_version(self, old_pack_files, latest_ver):
         for old_file in old_pack_files:
             version_pattern = re.compile(r"{}-((\d+)(.(\d+))*)".format(self.__package_name_pattern))
             items = re.findall(version_pattern, old_file)
@@ -131,9 +131,9 @@ class PackageDownloader(object):
                 if not latest_ver > cur_ver:
                     old_pack_files.remove(old_file)
     
-    def __deprecateOldPacks(self, latest_ver):
+    def __deprecate_old_packs(self, latest_ver):
         old_pack_files = glob.glob(os.path.join(self.__dl_dir, self.__package_name_pattern + "-*"))
-        self.__compareFileVersion(old_pack_files, latest_ver)
+        self.__compare_file_version(old_pack_files, latest_ver)
         if len(old_pack_files) > 0:
             print("Out-of-date packages found: \n{}\nMoving them into deprecated folder...".format(old_pack_files))
             deprecated_dir = os.path.join(self.__dl_dir, "..", "deprecated");
@@ -156,17 +156,17 @@ class DownloadListHander(object):
         for line in open(self.__conf_path):
             items = line.split()
             if len(items) == 2:
-                PackageDownloader(items[0], items[1], self.__dl_dir).downloadLatestVersion()
+                PackageDownloader(items[0], items[1], self.__dl_dir).download_latest_version()
             elif len(items) >= 1 and items[0] == ">>>>>>>>":
                 break;
         print("All tasks finished")
         
 class Main(object):
     def __init__(self):
-        self.__parseOpts()
+        self.__parse_opts()
         self.__start()
         
-    def __parseOpts(self):
+    def __parse_opts(self):
         parser = argparse.ArgumentParser()
         parser.add_argument("-o","--output", dest="dl_dir", help="specify package download directory")
         parser.add_argument("-c","--config", dest="conf_path", help="specify package list configuration file")
