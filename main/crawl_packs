@@ -13,6 +13,7 @@ import sys
 import glob
 import shutil
 from bs4 import BeautifulSoup
+from functools import reduce
 import argparse
 
 class VersionInfo(object):
@@ -28,12 +29,16 @@ class VersionInfo(object):
         for vnum in self.__num_array:
             if i == len(other.__num_array):
                 return True
-            if vnum > other.__num_array[i]:
+            if VersionInfo.value(vnum) > VersionInfo.value(other.__num_array[i]):
                 return True
-            elif vnum < other.__num_array[i]:
+            elif VersionInfo.value(vnum) < VersionInfo.value(other.__num_array[i]):
                 return False
             else:
                 i = i+1
+    
+    @staticmethod
+    def value(str):
+        return reduce((lambda x, y : x * 1000 + y), list(map(ord, list(str))))
     
     def show(self):
         if(self.__num_array == None):
@@ -60,15 +65,16 @@ class RequestReader(object):
             return response.read()
         
 class PackageInfo(object):
-    def __init__(self, version, dl_suffix):
+    def __init__(self, version, dl_addr, dl_suffix):
         self.version = version
+        self.dl_addr = dl_addr
         self.dl_suffix = dl_suffix
 
 class PackageDownloader(object):
     def __init__(self, package_name, repo_url, dl_dir):
         self.__package_name_pattern = package_name
         self.__repo_url = repo_url
-        self.__dl_dir = dl_dir
+        self.__dl_dir = dl_dir    
         
     def parse_pack_infos(self):
         print("Parsing download link for <{}> from {}".format(self.__package_name_pattern, self.__repo_url))
@@ -76,26 +82,46 @@ class PackageDownloader(object):
         #Prettify html content as a standard input for regular expression
         bs = BeautifulSoup(reader.get_content().decode(), "lxml")
         content = bs.prettify()
-        pack_name_pattern = "(({})-((\d+)(\.(\d+))*)\.tar\.(bz2|gz|xz))".format(self.__package_name_pattern)
-        protocol = self.__repo_url.split(":")[0]
+        
+        url_prefix_pattern = "(?P<prefix>(?P<protocol>http|https|ftp)://[\w\.]+/)(?:.*)"
+        prefix_pattern = re.compile(url_prefix_pattern);
+        prefix_item = re.search(prefix_pattern, self.__repo_url)
+        protocol = prefix_item.group('protocol')
+        url_prefix = prefix_item.group('prefix')
+        
+        pack_name_pattern = "(?P<filename>(?P<packname>{})(?:-|_)(?P<version>(?:\w+)(?:(\.|_)(?:\w+))*)\.tar\.(?:bz2|gz|xz))"\
+        .format(self.__package_name_pattern)
         if protocol == "http" or protocol == "https":
-            pack_name_pattern = "href=\"{}\"".format(pack_name_pattern)
+            pack_name_pattern = "href=\"(?P<nofollow_path>[\w/]*){}\"(?:.*)(rel=\"(?P<rel>\w+)\")".format(pack_name_pattern)
         pattern = re.compile(r"{}".format(pack_name_pattern))
-        items = re.findall(pattern, content)
-        if len(items) == 0:
-            print("Download link not found for {}!".format(self.__package_name_pattern))
-            return None
+        
         pack_names = set()
         package_infos = {}
-        for item in items:
-            pack_name = item[1]
-            version = VersionInfo(list(map(int, item[2].split("."))));
+        for item in re.finditer(pattern, content):
+            pack_name = item.group('packname')
+            version_str = item.group('version')
+            file_name = item.group('filename')
+            version = VersionInfo(version_str);
+            rel_conf = item.group('rel')
+            nofollow_path = item.group('nofollow_path')
+            if rel_conf and rel_conf == "nofollow":
+                dl_prefix = url_prefix
+                if nofollow_path:
+                    dl_prefix = dl_prefix + nofollow_path
+            else:
+                dl_prefix = self.__repo_url
+            dl_addr = dl_prefix + file_name
+            print(dl_addr)
             if pack_name in pack_names:
                 if version > package_infos[pack_name].version:
-                    package_infos[pack_name] = PackageInfo(version, item[0])
+                    package_infos[pack_name] = PackageInfo(version, dl_addr, file_name)
             else:
                 pack_names.add(pack_name)
-                package_infos[pack_name] = PackageInfo(version, item[0])
+                package_infos[pack_name] = PackageInfo(version, dl_addr, file_name)
+                
+        if len(package_infos) == 0:
+            print("Download link not found for {}!".format(self.__package_name_pattern))
+        
         return package_infos
     
     def download_latest_version(self):
@@ -116,10 +142,12 @@ class PackageDownloader(object):
         
     def __download(self, packInfo, dl_path):
         print("Downloading: {}...".format(packInfo.dl_suffix))
-        dl_request = RequestReader(self.__repo_url + packInfo.dl_suffix);
-        f = open(os.path.join(dl_path, packInfo.dl_suffix), "wb+")
-        f.write(dl_request.get_content())
-        f.close()
+        dl_request = RequestReader(packInfo.dl_addr);
+        content = dl_request.get_content()
+        if(content):
+            f = open(os.path.join(dl_path, packInfo.dl_suffix), "wb+")
+            f.write(content)
+            f.close()
         print("Finish!")
     
     def __compare_file_version(self, old_pack_files, latest_ver):
