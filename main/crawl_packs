@@ -89,12 +89,11 @@ class PackageDownloader(object):
         protocol = prefix_item.group('protocol')
         url_prefix = prefix_item.group('prefix')
         
-        pack_name_pattern = "(?P<filename>(?P<packname>{})(?:-|_)(?P<version>(?:\w+)(?:(\.|_)(?:\w+))*)\.tar\.(?:bz2|gz|xz))"\
+        pack_name_pattern = "(?P<filename>(?P<packname>{})(?:-|_)(?P<version>(?:\w+)(?:(\.|_)(?:\w+))*)\.tar\.(?:xz|gz|bz2))"\
         .format(self.__package_name_pattern)
         if protocol == "http" or protocol == "https":
-            pack_name_pattern = "href=\"(?P<nofollow_path>[\w/]*){}\"(?:.*)(rel=\"(?P<rel>\w+)\")".format(pack_name_pattern)
+            pack_name_pattern = "href=\"(?P<nofollow_path>[\w]*/)?{}\"(?:.*)(rel=\"(?P<rel>\w+)\")?".format(pack_name_pattern)
         pattern = re.compile(r"{}".format(pack_name_pattern))
-        
         pack_names = set()
         package_infos = {}
         for item in re.finditer(pattern, content):
@@ -111,7 +110,6 @@ class PackageDownloader(object):
             else:
                 dl_prefix = self.__repo_url
             dl_addr = dl_prefix + file_name
-            print(dl_addr)
             if pack_name in pack_names:
                 if version > package_infos[pack_name].version:
                     package_infos[pack_name] = PackageInfo(version, dl_addr, file_name)
