@@ -18,7 +18,7 @@ import argparse
 
 class VersionInfo(object):
     def __init__(self, num_array):
-        self.__num_array = num_array
+        self.__num_array = num_array.split('.')
         
     def __gt__(self, other):
         if self.__num_array == None and other.__num_array != None:
@@ -38,7 +38,8 @@ class VersionInfo(object):
     
     @staticmethod
     def value(str):
-        return reduce((lambda x, y : x * 1000 + y), list(map(ord, list(str))))
+        ret = reduce((lambda x, y : x * 1000 + y), list(map(ord, list(str))))
+        return ret
     
     def show(self):
         if(self.__num_array == None):
@@ -70,11 +71,15 @@ class PackageInfo(object):
         self.dl_addr = dl_addr
         self.dl_suffix = dl_suffix
 
-class PackageDownloader(object):
+class PackageDownloader(object):    
     def __init__(self, package_name, repo_url, dl_dir):
         self.__package_name_pattern = package_name
         self.__repo_url = repo_url
-        self.__dl_dir = dl_dir    
+        self.__dl_dir = dl_dir
+    
+    @classmethod    
+    def version_pattern(cls):
+        return "(?:\d+)(?:(\.|_)(?:\w+))*";
         
     def parse_pack_infos(self):
         print("Parsing download link for <{}> from {}".format(self.__package_name_pattern, self.__repo_url))
@@ -89,26 +94,26 @@ class PackageDownloader(object):
         protocol = prefix_item.group('protocol')
         url_prefix = prefix_item.group('prefix')
         
-        pack_name_pattern = "(?P<filename>(?P<packname>{})(?:-|_)(?P<version>(?:\w+)(?:(\.|_)(?:\w+))*)\.tar\.(?:xz|gz|bz2))"\
-        .format(self.__package_name_pattern)
+        pack_name_pattern = "(?P<filename>(?P<packname>{})(?:-|_)(?P<version>{})\.tar\.(?:xz|gz|bz2))"\
+        .format(self.__package_name_pattern, PackageDownloader.version_pattern())
         if protocol == "http" or protocol == "https":
-            pack_name_pattern = "href=\"(?P<nofollow_path>[\w]*/)?{}\"(?:.*)(rel=\"(?P<rel>\w+)\")?".format(pack_name_pattern)
+            pack_name_pattern = "href=\"(?P<nofollow_path>[\w:/]*/)?{}\"(?:.*(?=rel))?(rel=\"(?P<rel>\w+)\")?".format(pack_name_pattern)
         pattern = re.compile(r"{}".format(pack_name_pattern))
         pack_names = set()
         package_infos = {}
+        dl_prefix = self.__repo_url
         for item in re.finditer(pattern, content):
             pack_name = item.group('packname')
             version_str = item.group('version')
             file_name = item.group('filename')
             version = VersionInfo(version_str);
-            rel_conf = item.group('rel')
-            nofollow_path = item.group('nofollow_path')
-            if rel_conf and rel_conf == "nofollow":
-                dl_prefix = url_prefix
-                if nofollow_path:
-                    dl_prefix = dl_prefix + nofollow_path
-            else:
-                dl_prefix = self.__repo_url
+            if protocol == "http" or protocol == "https":
+                rel_conf = item.group('rel')
+                nofollow_path = item.group('nofollow_path')
+                if rel_conf and rel_conf == "nofollow":
+                    dl_prefix = url_prefix
+                    if nofollow_path:
+                        dl_prefix = dl_prefix + nofollow_path
             dl_addr = dl_prefix + file_name
             if pack_name in pack_names:
                 if version > package_infos[pack_name].version:
@@ -150,10 +155,10 @@ class PackageDownloader(object):
     
     def __compare_file_version(self, old_pack_files, latest_ver):
         for old_file in old_pack_files:
-            version_pattern = re.compile(r"{}-((\d+)(.(\d+))*)".format(self.__package_name_pattern))
+            version_pattern = re.compile(r"{}-({})".format(self.__package_name_pattern, PackageDownloader.version_pattern()))
             items = re.findall(version_pattern, old_file)
             if len(items) > 0:
-                cur_ver = VersionInfo(list(map(int, items[0][0].split("."))))
+                cur_ver = VersionInfo(items[0][0])
                 if not latest_ver > cur_ver:
                     old_pack_files.remove(old_file)
     
